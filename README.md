@@ -1,4 +1,4 @@
-# nft-count-hardhat
+# chn-gorvernance
 
 1. Install package 
     ```
@@ -12,5 +12,5 @@
     ```
 4. Deploy + verify:
     ```
-    yarn hardhat deploy --reset --tags deploy-verify  --network bsctestnet
+    yarn hardhat deploy --reset --tags deploy-verify  --network rinkeby
     ```
