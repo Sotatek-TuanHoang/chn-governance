@@ -27,8 +27,13 @@ function encodeParameters(types, values) {
   return abi.encode(types, values);
 }
 
+async function mineBlockNumber(blockNumber) {
+  return rpc({method: 'evm_mineBlockNumber', params: [blockNumber]});
+}
+
 
 module.exports = {
+  mineBlockNumber,
   etherUnsigned,
   freezeTime,
   increaseTime,

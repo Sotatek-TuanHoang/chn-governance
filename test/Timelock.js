@@ -34,8 +34,8 @@ contract('Timelock Contract', function (accounts) {
   });
 
   it('check constructor', async () => {
-    await expectThrow(CHNTimelock.new(root, deplayPeriod.div(24)), {from: root}, "Timelock::constructor: Delay must exceed minimum delay.");
-    await expectThrow(CHNTimelock.new(root, deplayPeriod.times(24)), {from: root}, "Timelock::setDelay: Delay must not exceed maximum delay.");
+    await expectThrow(CHNTimelock.new(root, deplayPeriod.div(24), {from: root}), "Timelock::constructor: Delay must exceed minimum delay.");
+    await expectThrow(CHNTimelock.new(root, deplayPeriod.times(24), {from: root}), "Timelock::setDelay: Delay must not exceed maximum delay.");
   });
 
   it('setDelay', async () => {
@@ -105,12 +105,13 @@ contract('Timelock Contract', function (accounts) {
   it('excute', async () => {
     const blockTime = await timelock.getBlockTimestamp();
     assertEqual(await timelock.delay(), deplayPeriod);
-    const [target, value, signature, data1, data2, eta] = [
+    const [target, value, signature, data1, data2, data3, eta] = [
       timelock.address,
       zero,
       "setDelay(uint256)",
       encodeParameters(['uint256'], [deplayPeriod.times(3).toNumber()]),
       encodeParameters(['uint256'], [deplayPeriod.times(2).toNumber()]),
+      encodeParameters(['uint256'], [deplayPeriod.times(4).toNumber()]),
       deplayPeriod.plus(blockTime).plus(20)
     ]
     await timelock.queueTransaction(target, value, signature, data1, eta);
@@ -123,7 +124,7 @@ contract('Timelock Contract', function (accounts) {
     const txHash2 = txQueues2.txHash;
     assertEqual(await timelock.queuedTransactions(txHash2), true);
 
-    await timelock.queueTransaction(target, value, signature, data1, eta);
+    await timelock.queueTransaction(target, value, signature, data3, eta);
     const txQueues3 = await timelock.txQueues(2);
     const txHash3 = txQueues3.txHash;
     assertEqual(await timelock.queuedTransactions(txHash3), true);
@@ -139,7 +140,7 @@ contract('Timelock Contract', function (accounts) {
     assertEqual(await timelock.delay(), deplayPeriod.times(2));
 
     increaseTime(deplayPeriod.plus(1000000000000000).toNumber());
-    await expectThrow(timelock.executeTransactionWithID(3), "Timelock::executeTransaction: Transaction is stale.");
+    await expectThrow(timelock.executeTransactionWithID(2), "Timelock::executeTransaction: Transaction is stale.");
 
   });
 
@@ -176,16 +177,22 @@ function assertEqual (val1, val2, errorStr) {
 }
 
 function expectError(message, messageCompare) {
-  messageCompare = "Error: VM Exception while processing transaction: revert " + messageCompare;
-  assert(message, messageCompare);
+  messageCompare = "Error: VM Exception while processing transaction: reverted with reason string '" + messageCompare + "'";
+  assert(message == messageCompare, 'Not valid message');
 }
 
 async function expectThrow(f1, messageCompare) {
+  let check = false;
   try {
     await f1;
   } catch (e) {
+    check = true;
     expectError(e.toString(), messageCompare)
   };
+
+  if (!check) {
+    assert(1 == 0, 'Not throw message');
+  }
 }
 
 async function increaseTime(second) {

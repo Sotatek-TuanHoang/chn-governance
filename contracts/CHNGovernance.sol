@@ -1,6 +1,7 @@
 pragma solidity ^0.5.16;
 pragma experimental ABIEncoderV2;
 import "./CHNGovernanceStorage.sol";
+import "hardhat/console.sol";
 
 contract CHNGovernance is CHNGovernanceStorage {
 
@@ -41,7 +42,7 @@ contract CHNGovernance is CHNGovernanceStorage {
     }
 
     function propose(address[] memory targets, uint[] memory values, string[] memory signatures, bytes[] memory calldatas, string memory description) public returns (uint) {
-        require(chnToken.balanceOf(msg.sender) > proposalThreshold, "GovernorAlpha::propose: proposer votes below proposal threshold");
+        require(chnToken.balanceOf(msg.sender) >= proposalThreshold, "GovernorAlpha::propose: proposer votes below proposal threshold");
         require(targets.length == values.length && targets.length == signatures.length && targets.length == calldatas.length, "GovernorAlpha::propose: proposal function information arity mismatch");
         require(targets.length != 0, "GovernorAlpha::propose: must provide actions");
         require(targets.length <= proposalMaxOperations, "GovernorAlpha::propose: too many actions");
@@ -111,7 +112,7 @@ contract CHNGovernance is CHNGovernanceStorage {
         require(state != ProposalState.Executed, "GovernorAlpha::cancel: cannot cancel executed proposal");
 
         Proposal storage proposal = proposals[proposalId];
-        require(msg.sender == guardian || chnToken.balanceOf(msg.sender) < proposalThreshold, "GovernorAlpha::cancel: proposer above threshold");
+        require(msg.sender == guardian || chnToken.balanceOf(proposal.proposer) < proposalThreshold, "GovernorAlpha::cancel: proposer above threshold");
 
         proposal.canceled = true;
         for (uint i = 0; i < proposal.targets.length; i++) {

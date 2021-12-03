@@ -1,6 +1,7 @@
 const FakeToken = artifacts.require('FakeToken');
 const CHNGovernance = artifacts.require('CHNGovernance');
 const CHNTimelock = artifacts.require('CHNTimelock');
+const TimelockHarness = artifacts.require('TimelockHarness');
 const { default: BigNumber } = require('bignumber.js');
 const { assert } = require('chai');
 const { ethers, waffle } = require('hardhat');
@@ -9,7 +10,8 @@ const BN = web3.utils.BN;
 const {
   etherUnsigned,
   freezeTime,
-  encodeParameters
+  encodeParameters,
+  mineBlockNumber
 } = require('./Ethereum');
 
 require('chai')
@@ -22,150 +24,119 @@ contract('CHNGovernance Contract', function (accounts) {
   let a1 = accounts[1];
   let a2 = accounts[2];
   let newAdmin = accounts[3];
-  let CHNToken;
+  let token;
   let timelock;
+  let governance;
 
   const deplayPeriod = new BigNumber(3).times(24).times(60).times(60);
   const zero = new BigNumber(0);
   const gracePeriod = deplayPeriod.times(2);
+  const proposalThreshHold = new BigNumber('100000000000000000000');
+  const notValidThreshHold = proposalThreshHold.minus(1);
 
   beforeEach(async () => {
-    timelock = await CHNTimelock.new(root, deplayPeriod);
+    timelock = await TimelockHarness.new(root, deplayPeriod);
+    token = await FakeToken.new("10000000000000000000000000");
+    let configs = [proposalThreshHold, proposalThreshHold, 5, 1, 17280];
+    governance = await CHNGovernance.new(timelock.address, token.address, root, configs);
   });
 
-  it('check constructor', async () => {
-    await expectThrow(CHNTimelock.new(root, deplayPeriod.div(24)), {from: root}, "Timelock::constructor: Delay must exceed minimum delay.");
-    await expectThrow(CHNTimelock.new(root, deplayPeriod.times(24)), {from: root}, "Timelock::setDelay: Delay must not exceed maximum delay.");
+  it('create proposal: check vote', async () => {
+    targets = [governance.address, governance.address];
+    values = ["0", "0"];
+    signatures = ["changeQuorumVotes(uint256)", "changeProposalThreshold(uint256)"];
+    callDatas = [encodeParameters(['uint256'], [proposalThreshHold.plus(1).toString()]), encodeParameters(['uint256'], [proposalThreshHold.plus(1).toString()])];
+
+    await expectThrow(governance.propose(targets, values, signatures, callDatas, "This is test", {from: a1}), "GovernorAlpha::propose: proposer votes below proposal threshold");
+    token.mintForUser(notValidThreshHold, {from: a1});
+    await expectThrow(governance.propose(targets, values, signatures, callDatas, "This is test", {from: a1}), "GovernorAlpha::propose: proposer votes below proposal threshold");
+    token.mintForUser(3, {from: a1});
+    await governance.propose(targets, values, signatures, callDatas, "This is test", {from: a1});
+    await expectThrow(governance.propose(targets, values, signatures, callDatas, "This is test", {from: a1}), "GovernorAlpha::propose: found an already pending proposal");
+    assertEqual(await governance.proposalCount(), '1');
   });
 
-  it('setDelay', async () => {
-    const blockTime = await timelock.getBlockTimestamp();
-    assertEqual(await timelock.delay(), deplayPeriod);
-    const [target, value, signature, data, eta] = [
-      timelock.address,
-      zero,
-      "setDelay(uint256)",
-      encodeParameters(['uint256'], [deplayPeriod.times(2).toNumber()]),
-      deplayPeriod.plus(blockTime).plus(2)
-    ]
-    await timelock.queueTransaction(target, value, signature, data, eta);
-    const txQueues = await timelock.txQueues(0);
-    assert(txQueues.signature, "setDelay(uint256)");
-    const txHash = txQueues.txHash;
-    
-    assertEqual(await timelock.queuedTransactions(txHash), true);
-    increaseTime(deplayPeriod.plus(10).toNumber());
-    await timelock.executeTransaction(0);
-    assertEqual(await timelock.delay(), deplayPeriod.times(2));
-    assertEqual(await timelock.queuedTransactions(txHash), false);
-    await expectThrow(timelock.setDelay(100, {from: root}), "Timelock::setDelay: Call must come from Timelock.");
+  it('create proposal: check max action', async () => {
+    let newConfig = [proposalThreshHold, proposalThreshHold, 1, 1, 17280];
+    const newGov = await CHNGovernance.new(timelock.address, token.address, root, newConfig);
+
+    targets = [governance.address, governance.address];
+    values = ["0", "0"];
+    signatures = ["changeQuorumVotes(uint256)", "changeProposalThreshold(uint256)"];
+    callDatas = [encodeParameters(['uint256'], [proposalThreshHold.plus(1).toString()]), encodeParameters(['uint256'], [proposalThreshHold.plus(1).toString()])];
+    await expectThrow(newGov.propose(targets, values, signatures, callDatas, "This is test", {from: root}), "GovernorAlpha::propose: too many actions");
   });
 
-  it('queueTx', async () => {
-    const blockTime = await timelock.getBlockTimestamp();
-    assertEqual(await timelock.delay(), deplayPeriod);
-    const [target, value, signature, data, eta] = [
-      timelock.address,
-      zero,
-      "setDelay(uint256)",
-      encodeParameters(['uint256'], [deplayPeriod.times(2).toNumber()]),
-      deplayPeriod.plus(blockTime).plus(2)
-    ]
-    await timelock.queueTransaction(target, value, signature, data, eta);
-    const txQueues = await timelock.txQueues(0);
-    assert(txQueues.signature, "setDelay(uint256)");
+  it('cast proposal', async () => {
+    let newConfig = [proposalThreshHold, proposalThreshHold, 2, 0, 100];
+    const newGov = await CHNGovernance.new(timelock.address, token.address, root, newConfig);
+    targets = [governance.address, governance.address];
+    values = ["0", "0"];
+    signatures = ["changeQuorumVotes(uint256)", "changeProposalThreshold(uint256)"];
+    callDatas = [encodeParameters(['uint256'], [proposalThreshHold.plus(1).toString()]), encodeParameters(['uint256'], [proposalThreshHold.plus(1).toString()])];
 
-    const notValidETA = deplayPeriod.plus(blockTime).minus(1);
-    await expectThrow(timelock.queueTransaction(target, value, signature, data, notValidETA), "Timelock::queueTransaction: Estimated execution block must satisfy delay.");
-    await expectThrow(timelock.queueTransaction(target, value, signature, data, eta, {from: a1}), "Timelock::queueTransaction: Call must come from admin.");
-  });
+    await newGov.propose(targets, values, signatures, callDatas, "This is test", {from: root});
+    const beforeVote = await newGov.proposals(1);
 
-  it('cancel', async () => {
-    const blockTime = await timelock.getBlockTimestamp();
-    assertEqual(await timelock.delay(), deplayPeriod);
-    const [target, value, signature, data, eta] = [
-      timelock.address,
-      zero,
-      "setDelay(uint256)",
-      encodeParameters(['uint256'], [deplayPeriod.times(2).toNumber()]),
-      deplayPeriod.plus(blockTime).plus(2)
-    ]
-    await timelock.queueTransaction(target, value, signature, data, eta);
-    const txQueues = await timelock.txQueues(0);
-    assert(txQueues.signature, "setDelay(uint256)");
-    const txHash = txQueues.txHash;
-    assertEqual(await timelock.queuedTransactions(txHash), true);
+    await newGov.castVote(1, true);
+    const afterVote1 = await newGov.proposals(1);
 
-    await expectThrow(timelock.cancelTransaction(0, {from: a1}), "Timelock::cancelTransaction: Call must come from admin.");
-    await timelock.cancelTransaction(0);
-    assertEqual(await timelock.queuedTransactions(txHash), false);
+    token.mintForUser(3, {from: a1});
+    await newGov.castVote(1, false, {from: a1});
+    const afterVote2 = await newGov.proposals(1);
+    await expectThrow(newGov.castVote(1, {from: a1}), "GovernorAlpha::_castVote: voter already voted");
 
   });
 
-  it('excute', async () => {
-    const blockTime = await timelock.getBlockTimestamp();
-    assertEqual(await timelock.delay(), deplayPeriod);
-    const [target, value, signature, data1, data2, eta] = [
-      timelock.address,
-      zero,
-      "setDelay(uint256)",
-      encodeParameters(['uint256'], [deplayPeriod.times(3).toNumber()]),
-      encodeParameters(['uint256'], [deplayPeriod.times(2).toNumber()]),
-      deplayPeriod.plus(blockTime).plus(20)
-    ]
-    await timelock.queueTransaction(target, value, signature, data1, eta);
-    const txQueues1 = await timelock.txQueues(0);
-    const txHash1 = txQueues1.txHash;
-    assertEqual(await timelock.queuedTransactions(txHash1), true);
+  it('queue proposal', async () => {
+    let newConfig = [proposalThreshHold, proposalThreshHold, 2, 0, 2];
+    const newGov = await CHNGovernance.new(timelock.address, token.address, root, newConfig);
+    targets = [governance.address, governance.address];
+    values = ["0", "0"];
+    signatures = ["changeQuorumVotes(uint256)", "changeProposalThreshold(uint256)"];
+    callDatas = [encodeParameters(['uint256'], [proposalThreshHold.plus(1).toString()]), encodeParameters(['uint256'], [proposalThreshHold.plus(1).toString()])];
 
-    await timelock.queueTransaction(target, value, signature, data2, eta);
-    const txQueues2 = await timelock.txQueues(1);
-    const txHash2 = txQueues2.txHash;
-    assertEqual(await timelock.queuedTransactions(txHash2), true);
+    await newGov.propose(targets, values, signatures, callDatas, "This is test", {from: root});
+    await newGov.castVote(1, true);
+    await expectThrow(newGov.queue(1), "GovernorAlpha::queue: proposal can only be queued if it is succeeded");
+    await timelock.harnessSetAdmin(newGov.address);
+    await newGov.queue(1);
+  });
 
-    await timelock.queueTransaction(target, value, signature, data1, eta);
-    const txQueues3 = await timelock.txQueues(2);
-    const txHash3 = txQueues3.txHash;
-    assertEqual(await timelock.queuedTransactions(txHash3), true);
-
-    await expectThrow(timelock.executeTransaction(0, {from: a1}), "Timelock::executeTransaction: Call must come from admin.");
-    await expectThrow(timelock.executeTransaction(0), "Timelock::executeTransaction: Transaction hasn't surpassed time lock.");
-
-    await timelock.cancelTransaction(0);
-    await expectThrow(timelock.executeTransaction(0), "Timelock::executeTransaction: Transaction hasn't been queued.");
-
-    increaseTime(deplayPeriod.plus(100).toNumber());
-    await timelock.executeTransaction(1);
-    assertEqual(await timelock.delay(), deplayPeriod.times(2));
-
-    increaseTime(deplayPeriod.plus(1000000000000000).toNumber());
-    await expectThrow(timelock.executeTransaction(3), "Timelock::executeTransaction: Transaction is stale.");
+  it('cancel proposal', async () => {
+    let newConfig = [proposalThreshHold, proposalThreshHold, 2, 0, 200];
+    const newGov = await CHNGovernance.new(timelock.address, token.address, root, newConfig);
+    await timelock.harnessSetAdmin(newGov.address);
+    targets = [governance.address, governance.address];
+    values = ["0", "0"];
+    signatures = ["changeQuorumVotes(uint256)", "changeProposalThreshold(uint256)"];
+    callDatas = [encodeParameters(['uint256'], [proposalThreshHold.plus(1).toString()]), encodeParameters(['uint256'], [proposalThreshHold.plus(1).toString()])];
+    token.mintForUser(proposalThreshHold, {from: a1});
+    await newGov.propose(targets, values, signatures, callDatas, "This is test", {from: a1});
+    await expectThrow(newGov.cancel(1, {from: a1}), "GovernorAlpha::cancel: proposer above threshold");
+    await token.transfer(a2, 10000, {from: a1});
+    await newGov.cancel(1, {from: a1});
 
   });
 
-  it('set new admin', async () => {
-    await expectThrow(timelock.setPendingAdmin(newAdmin, {from: a1}), "Timelock::setPendingAdmin: Call must come from Timelock.");
-    const blockTime = await timelock.getBlockTimestamp();
-    assertEqual(await timelock.delay(), deplayPeriod);
-    const [target, value, signature, data, eta] = [
-      timelock.address,
-      zero,
-      "setPendingAdmin(address)",
-      encodeParameters(['address'], [newAdmin]),
-      deplayPeriod.plus(blockTime).plus(2)
-    ]
-    await timelock.queueTransaction(target, value, signature, data, eta);
-    const txQueues = await timelock.txQueues(0);
-    const txHash = txQueues.txHash;
-    assertEqual(await timelock.queuedTransactions(txHash), true);
-    increaseTime(deplayPeriod.plus(100).toNumber());
-    await timelock.executeTransaction(0);
-    assertEqual(await timelock.pendingAdmin(), newAdmin);
+  it('cancel proposal', async () => {
+    let newConfig = [proposalThreshHold, proposalThreshHold, 2, 0, 2];
+    const newGov = await CHNGovernance.new(timelock.address, token.address, root, newConfig);
+    targets = [newGov.address, newGov.address];
+    values = ["0", "0"];
+    signatures = ["changeQuorumVotes(uint256)", "changeProposalThreshold(uint256)"];
+    callDatas = [encodeParameters(['uint256'], [proposalThreshHold.plus(1).toString()]), encodeParameters(['uint256'], [proposalThreshHold.plus(1).toString()])];
 
-    await expectThrow(timelock.acceptAdmin({from: a1}), "Timelock::acceptAdmin: Call must come from pendingAdmin.");
-    await timelock.acceptAdmin({from: newAdmin});
-    assertEqual(await timelock.admin(), newAdmin);
+    await newGov.propose(targets, values, signatures, callDatas, "This is test", {from: root});
+    await newGov.castVote(1, true);
+    await expectThrow(newGov.queue(1), "GovernorAlpha::queue: proposal can only be queued if it is succeeded");
+    await timelock.harnessSetAdmin(newGov.address);
+    await newGov.queue(1);
+
+    await timelock.harnessExecuteTransactionWithID(0);
+    assertEqual(await newGov.quorumVotes(), proposalThreshHold.plus(1).toString());
   });
+
 });
 
 
@@ -176,16 +147,22 @@ function assertEqual (val1, val2, errorStr) {
 }
 
 function expectError(message, messageCompare) {
-  messageCompare = "Error: VM Exception while processing transaction: revert " + messageCompare;
-  assert(message, messageCompare);
+  messageCompare = "Error: VM Exception while processing transaction: reverted with reason string '" + messageCompare + "'";
+  assert(message == messageCompare, 'Not valid message');
 }
 
 async function expectThrow(f1, messageCompare) {
+  let check = false;
   try {
     await f1;
   } catch (e) {
+    check = true;
     expectError(e.toString(), messageCompare)
   };
+
+  if (!check) {
+    assert(1 == 0, 'Not throw message');
+  }
 }
 
 async function increaseTime(second) {
