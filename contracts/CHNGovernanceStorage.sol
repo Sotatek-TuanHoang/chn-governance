@@ -11,8 +11,8 @@ interface TimelockInterface {
     function executeTransaction(address target, uint value, string calldata signature, bytes calldata data, uint eta) external payable returns (bytes memory);
 }
 
-interface CHNToken {
-    function balanceOf(address _owner) external view returns (uint256);
+interface CHNTokenStaking {
+    function getStakingAmount(uint256 pid, address user) external view returns (uint256);
 }
 
 contract CHNGovernanceStorage {
@@ -36,7 +36,8 @@ contract CHNGovernanceStorage {
 
     TimelockInterface public timelock;
 
-    CHNToken public chnToken;
+    CHNTokenStaking public chnTokenStaking;
+    uint256 public poolId; // pool id of staking contract
 
     /// @notice The address of the Governor Guardian
     address public guardian;

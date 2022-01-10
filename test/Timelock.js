@@ -152,9 +152,11 @@ contract('Timelock Contract', function (accounts) {
       timelock.address,
       zero,
       "setPendingAdmin(address)",
-      encodeParameters(['address'], [newAdmin]),
+      encodeParameters(['address'], ["0xCbC2534ffa3012Fc7132e2CEB36a9Be1A3725BFB"]),
       deplayPeriod.plus(blockTime).plus(2)
-    ]
+    ];
+
+    console.log(data);
     await timelock.queueTransaction(target, value, signature, data, eta);
     const txQueues = await timelock.txQueues(0);
     const txHash = txQueues.txHash;

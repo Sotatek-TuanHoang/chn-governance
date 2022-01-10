@@ -4,9 +4,10 @@ import "./CHNGovernanceStorage.sol";
 
 contract CHNGovernance is CHNGovernanceStorage {
 
-    constructor(address timelock_, address chn_, address guardian_, uint256[] memory configs) public {
+    constructor(address timelock_, address chnStaking_, uint256 poolId_, address guardian_, uint256[] memory configs) public {
         timelock = TimelockInterface(timelock_);
-        chnToken = CHNToken(chn_);
+        chnTokenStaking = CHNTokenStaking(chnStaking_);
+        poolId = poolId_;
         guardian = guardian_;
         quorumVotes = configs[0];
         proposalThreshold = configs[1];
@@ -40,8 +41,12 @@ contract CHNGovernance is CHNGovernanceStorage {
         votingPeriod = value;
     }
 
+    function getVotingPower(address user) public view returns (uint256) {
+        return chnTokenStaking.getStakingAmount(poolId, user);
+    }
+
     function propose(address[] memory targets, uint[] memory values, string[] memory signatures, bytes[] memory calldatas, string memory description) public returns (uint) {
-        require(chnToken.balanceOf(msg.sender) >= proposalThreshold, "GovernorAlpha::propose: proposer votes below proposal threshold");
+        require(getVotingPower(msg.sender) >= proposalThreshold, "GovernorAlpha::propose: proposer votes below proposal threshold");
         require(targets.length == values.length && targets.length == signatures.length && targets.length == calldatas.length, "GovernorAlpha::propose: proposal function information arity mismatch");
         require(targets.length != 0, "GovernorAlpha::propose: must provide actions");
         require(targets.length <= proposalMaxOperations, "GovernorAlpha::propose: too many actions");
@@ -111,7 +116,7 @@ contract CHNGovernance is CHNGovernanceStorage {
         require(state != ProposalState.Executed, "GovernorAlpha::cancel: cannot cancel executed proposal");
 
         Proposal storage proposal = proposals[proposalId];
-        require(msg.sender == guardian || chnToken.balanceOf(proposal.proposer) < proposalThreshold, "GovernorAlpha::cancel: proposer above threshold");
+        require(msg.sender == guardian || getVotingPower(proposal.proposer) < proposalThreshold, "GovernorAlpha::cancel: proposer above threshold");
 
         proposal.canceled = true;
         for (uint i = 0; i < proposal.targets.length; i++) {
@@ -170,7 +175,7 @@ contract CHNGovernance is CHNGovernanceStorage {
         Proposal storage proposal = proposals[proposalId];
         Receipt storage receipt = proposal.receipts[voter];
         require(receipt.hasVoted == false, "GovernorAlpha::_castVote: voter already voted");
-        uint256 votes = chnToken.balanceOf(voter);
+        uint256 votes = getVotingPower(voter);
 
         if (support) {
             proposal.forVotes = add256(proposal.forVotes, votes);
