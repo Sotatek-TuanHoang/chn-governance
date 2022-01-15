@@ -1,51 +1,78 @@
 require("dotenv").config();
+const { Contract, providers, Wallet } = require("ethers");
 const { deployments, ethers, artifacts } = require("hardhat");
+const {
+  etherUnsigned,
+  freezeTime,
+  encodeParameters
+} = require('../test/Ethereum');
 
 const func = async function ({ deployments, getNamedAccounts, getChainId }) {
   const { deploy, execute } = deployments;
   const { deployer } = await getNamedAccounts();
-  const chnAddress = process.env.CHN_ADDRESS;
+  const chnAddress = process.env.CHN_STAKING_ADDRESS;
+  const poolIdStaking = process.env.POOl_ID_STAKING;
+  const quorumVotes = process.env.QUORUM_VOTES;
+  const proposalThreshold = process.env.PROPOSAL_THRESHOLD;
+  const proposalMaxOperations = process.env.PROPOSAL_MAXOPERATIONS;
+  const votingDelay = process.env.VOTING_DELAY;
+  const votingPeriod = process.env.VOTING_PERIOD;
+  const timelockDelay = process.env.TIMELOCK_DELAY;
+  const provider = new providers.JsonRpcProvider(process.env.RPC_URL);
 
   console.log( {deployer} );
   
   const timelock = await deploy("CHNTimelock", {
     from: deployer,
-    args: [deployer, '180'],
-    // args: [deployer, '259200'],
+    args: [deployer, timelockDelay],
     log: true,
   });
 
   const governance = await deploy("CHNGovernance", {
     from: deployer,
-    // args: [timelock.address, chnAddress, deployer, ['100000000000000000000', '100000000000000000000', 50, 1, 17280]],
-    args: [timelock.address, chnAddress, 0, deployer, ['100000000000000000000', '100000000000000000000', 50, 1, 1800]],
+    args: [timelock.address, chnAddress, 0, deployer, [quorumVotes, proposalThreshold, proposalMaxOperations, votingDelay, votingPeriod]],
     log: true,
   });
 
   console.log(timelock.address);
   console.log(governance.address);
 
+  const timelockABI = [
+    "function queueTransaction(address target, uint value, string memory signature, bytes memory data, uint eta) external returns (bytes32)"
+  ];
+
+  const target = timelock.address;
+  const value = 0;
+  const signature = "setPendingAdmin(address)";
+  const data = encodeParameters(['address'], [governance.address]);
+  const eta = Math.floor((new Date()).getTime() / 1000) + 300;
+
+  const admin = new Wallet(process.env.ACC_PRIVATE_KEY, provider);
+
+  console.log(target, value, signature, data, eta);
+  const timelockContract = new Contract(timelock.address, timelockABI, provider);
+  const setPendingHash = await timelockContract.connect(admin).queueTransaction(target, value, signature, data, eta, {gasLimit: 400000});
+  await setPendingHash.wait();
+
   await sleep(30000);
 
   try {
     await hre.run('verify:verify', {
       address: timelock.address,
-      constructorArguments: [deployer, '180'],
-      // constructorArguments: [deployer, '259200'],
+      constructorArguments: [deployer, timelockDelay],
     })
   } catch {
 
   }
 
-  // try {
+  try {
     await hre.run('verify:verify', {
       address: governance.address,
-      // constructorArguments: [timelock.address, chnAddress, deployer, ['100000000000000000000', '100000000000000000000', 50, 1, 17280]],
-      constructorArguments: [timelock.address, chnAddress, 0, deployer, ['100000000000000000000', '100000000000000000000', 50, 1, 1800]],
+      constructorArguments: [timelock.address, chnAddress, 0, deployer, [quorumVotes, proposalThreshold, proposalMaxOperations, votingDelay, votingPeriod]],
     })
-  // } catch {
+  } catch {
 
-  // }
+  }
 };
 
 module.exports = func;

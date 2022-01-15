@@ -16,6 +16,12 @@ contract CHNGovernance is CHNGovernanceStorage {
         votingPeriod = configs[4];
     }
 
+    function changeStakingContract(address staking, uint256 pid) public {
+        require(address(timelock) == msg.sender, "GovernorAlpha: Only Timelock");
+        chnTokenStaking = CHNTokenStaking(staking);
+        poolId = pid;
+    }
+
     function changeQuorumVotes(uint256 value) public {
         require(address(timelock) == msg.sender, "GovernorAlpha: Only Timelock");
         quorumVotes = value;
