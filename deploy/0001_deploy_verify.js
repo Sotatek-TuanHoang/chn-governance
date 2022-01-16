@@ -45,7 +45,7 @@ const func = async function ({ deployments, getNamedAccounts, getChainId }) {
   const value = 0;
   const signature = "setPendingAdmin(address)";
   const data = encodeParameters(['address'], [governance.address]);
-  const eta = Math.floor((new Date()).getTime() / 1000) + 300;
+  const eta = Math.floor((new Date()).getTime() / 1000) + timelockDelay + 1000;
 
   const admin = new Wallet(process.env.ACC_PRIVATE_KEY, provider);
 
